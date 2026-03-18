@@ -1,6 +1,14 @@
 .env
 .envrc
 kubeconfig
+
+# OpenTofu state and provider cache
+bootstrap/.terraform/
+bootstrap/.terraform.lock.hcl
+bootstrap/*.tfstate
+bootstrap/*.tfstate.backup
+
+# Legacy paths (in case of rename)
 tofu/.terraform/
 tofu/.terraform.lock.hcl
 tofu/*.tfstate
