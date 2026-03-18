@@ -20,10 +20,6 @@ metadata:
 spec:
   interval: 1h
   releaseName: otel-collector
-  chartRef:
-    kind: HelmRepository
-    name: opentelemetry
-    namespace: flux-system
   chart:
     spec:
       chart: opentelemetry-collector
@@ -36,6 +32,8 @@ spec:
     createNamespace: true
   values:
     mode: deployment
+    image:
+      repository: otel/opentelemetry-collector-contrib
     config:
       receivers:
         otlp:
@@ -53,18 +51,18 @@ spec:
           endpoint: phoenix.phoenix.svc.cluster.local:6006
           tls:
             insecure: true
-        logging:
+        debug:
           verbosity: detailed
       service:
         pipelines:
           traces:
             receivers: [otlp]
             processors: [memory_limiter, batch]
-            exporters: [otlp/phoenix, logging]
+            exporters: [otlp/phoenix, debug]
           metrics:
             receivers: [otlp]
             processors: [memory_limiter, batch]
-            exporters: [logging]
+            exporters: [debug]
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
