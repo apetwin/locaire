@@ -46,6 +46,8 @@ resource "kubectl_manifest" "rsip" {
     spec:
       type: OCIArtifactTag
       url: ${var.oci_registry}/releases
+      secretRef:
+        name: ghcr-auth
       filter:
         includeTag: "^\\d+\\.\\d+\\.\\d+$"
         limit: 1
@@ -81,6 +83,8 @@ resource "kubectl_manifest" "rset" {
           url: ${var.oci_registry}/releases
           ref:
             tag: "<< inputs.tag >>"
+          secretRef:
+            name: ghcr-auth
       - apiVersion: kustomize.toolkit.fluxcd.io/v1
         kind: Kustomization
         metadata:

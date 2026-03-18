@@ -22,7 +22,10 @@ spec:
     spec:
       containers:
       - name: phoenix
-        image: ariziai/phoenix:latest
+        image: arizephoenix/phoenix:latest
+        env:
+        - name: PHOENIX_PORT
+          value: "6006"
         ports:
         - containerPort: 6006
           name: http
