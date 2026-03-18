@@ -2,6 +2,9 @@
 .envrc
 kubeconfig
 
+# KinD kubeconfig (contains cluster certs + keys)
+bootstrap/aibox-config
+
 # OpenTofu state and provider cache
 bootstrap/.terraform/
 bootstrap/.terraform.lock.hcl
