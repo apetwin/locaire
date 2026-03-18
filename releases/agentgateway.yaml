@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentgateway-system
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: agentgateway
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/kgateway-dev/charts/agentgateway
+  ref:
+    tag: "v2.2.1"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: agentgateway
+  namespace: agentgateway-system
+spec:
+  interval: 1h
+  releaseName: agentgateway
+  dependsOn:
+    - name: agentgateway-crds
+      namespace: agentgateway-system
+  chartRef:
+    kind: OCIRepository
+    name: agentgateway
+    namespace: flux-system
+  install:
+    createNamespace: true
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: agentgateway-external
+  namespace: agentgateway-system
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+---
+# LLM Backend routing configuration
+# TODO: verify CRD name against agentgateway v2.2.1 docs at https://agentgateway.dev
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: Backend
+metadata:
+  name: openai
+  namespace: agentgateway-system
+spec:
+  endpoint: https://api.openai.com/v1
+  auth:
+    secretKeyRef:
+      name: llm-api-keys
+      key: OPENAI_API_KEY
+---
+# TODO: verify CRD name against agentgateway v2.2.1 docs at https://agentgateway.dev
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: Backend
+metadata:
+  name: anthropic
+  namespace: agentgateway-system
+spec:
+  endpoint: https://api.anthropic.com/v1
+  auth:
+    secretKeyRef:
+      name: llm-api-keys
+      key: ANTHROPIC_API_KEY
+---
+# TODO: verify CRD name against agentgateway v2.2.1 docs at https://agentgateway.dev
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: Backend
+metadata:
+  name: ollama-local
+  namespace: agentgateway-system
+spec:
+  endpoint: http://host.docker.internal:11434
+---
+# TODO: verify CRD name against agentgateway v2.2.1 docs at https://agentgateway.dev
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: BackendPolicy
+metadata:
+  name: llm-failover
+  namespace: agentgateway-system
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: agentgateway-external
+  failover:
+    backends:
+    - name: openai
+    - name: anthropic
+    - name: ollama-local
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-api-keys
+  namespace: agentgateway-system
+type: Opaque
+stringData:
+  OPENAI_API_KEY: "REPLACE_ME"
+  ANTHROPIC_API_KEY: "REPLACE_ME"

@@ -1,0 +1,93 @@
+name: Push releases as OCI artifact
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'releases/**'
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Flux CLI
+        uses: fluxcd/flux2/action@main
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute next semver tag
+        id: version
+        run: |
+          # Fetch all tags
+          git fetch --tags
+
+          # Find latest v* tag, default to v0.0.0
+          LATEST=$(git tag -l 'v*' --sort=-v:refname | head -n1 || echo "v0.0.0")
+          LATEST="${LATEST:-v0.0.0}"
+
+          # Strip the v prefix
+          VERSION="${LATEST#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          # Bump: if patch >= 9, bump minor and reset patch
+          # RSIP uses lexicographic sort — 0.3.10 < 0.3.9
+          if [ "$PATCH" -ge 9 ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "semver=${MAJOR}.${MINOR}.${PATCH}" >> $GITHUB_OUTPUT
+          echo "Next version: ${TAG}"
+
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.version.outputs.tag }}
+          git push origin ${{ steps.version.outputs.tag }}
+
+      - name: Push OCI artifact
+        id: push
+        run: |
+          digest=$(flux push artifact \
+            oci://ghcr.io/${{ github.repository }}/releases:${{ steps.version.outputs.semver }} \
+            --path="./releases" \
+            --source="${{ github.repositoryUrl }}" \
+            --revision="${{ github.ref_name }}@sha1:${{ github.sha }}" \
+            --output json | jq -r '.digest')
+          echo "digest=${digest}" >> $GITHUB_OUTPUT
+
+      - name: Tag artifact as latest
+        run: |
+          flux tag artifact \
+            oci://ghcr.io/${{ github.repository }}/releases:${{ steps.version.outputs.semver }}@${{ steps.push.outputs.digest }} \
+            --tag latest
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ steps.version.outputs.tag }} \
+            --generate-notes \
+            --title "Release ${{ steps.version.outputs.tag }}"
