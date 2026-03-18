@@ -1,0 +1,7 @@
+.env
+.envrc
+kubeconfig
+tofu/.terraform/
+tofu/.terraform.lock.hcl
+tofu/*.tfstate
+tofu/*.tfstate.backup
