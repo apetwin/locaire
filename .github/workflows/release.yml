@@ -18,10 +18,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Required for full tag history used in version computation
 
       - name: Setup Flux CLI
-        uses: fluxcd/flux2/action@main
+        # Pin to a specific release tag — never use @main in production workflows.
+        # Check https://github.com/fluxcd/flux2/releases for the latest version.
+        uses: fluxcd/flux2/action@v2.4.0
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -32,22 +34,26 @@ jobs:
 
       - name: Compute next semver tag
         id: version
+        shell: bash
         run: |
-          # Fetch all tags
-          git fetch --tags
+          set -euo pipefail
 
-          # Find latest v* tag, default to v0.0.0
-          LATEST=$(git tag -l 'v*' --sort=-v:refname | head -n1 || echo "v0.0.0")
+          # fetch-depth: 0 already includes all tags — no need for git fetch --tags
+
+          # Find the latest v* tag; the :- fallback handles a repo with no tags yet
+          LATEST=$(git tag -l 'v*' --sort=-v:refname | head -n1)
           LATEST="${LATEST:-v0.0.0}"
 
-          # Strip the v prefix
           VERSION="${LATEST#v}"
           MAJOR=$(echo "$VERSION" | cut -d. -f1)
           MINOR=$(echo "$VERSION" | cut -d. -f2)
           PATCH=$(echo "$VERSION" | cut -d. -f3)
 
-          # Bump: if patch >= 9, bump minor and reset patch
-          # RSIP uses lexicographic sort — 0.3.10 < 0.3.9
+          # Flux source-controller (ImagePolicy / RSIP) uses lexicographic tag
+          # sorting, which means v0.3.10 sorts BEFORE v0.3.9. To avoid this,
+          # patch is intentionally capped at 9: when reached, minor increments
+          # and patch resets. Do not remove this cap without migrating the
+          # ImagePolicy semver range in all consuming clusters.
           if [ "$PATCH" -ge 9 ]; then
             MINOR=$((MINOR + 1))
             PATCH=0
@@ -56,38 +62,42 @@ jobs:
           fi
 
           TAG="v${MAJOR}.${MINOR}.${PATCH}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "semver=${MAJOR}.${MINOR}.${PATCH}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "semver=${MAJOR}.${MINOR}.${PATCH}" >> "$GITHUB_OUTPUT"
           echo "Next version: ${TAG}"
-
-      - name: Create git tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag ${{ steps.version.outputs.tag }}
-          git push origin ${{ steps.version.outputs.tag }}
 
       - name: Push OCI artifact
         id: push
         run: |
           digest=$(flux push artifact \
-            oci://ghcr.io/${{ github.repository }}/releases:${{ steps.version.outputs.semver }} \
+            "oci://ghcr.io/${{ github.repository }}/releases:${{ steps.version.outputs.semver }}" \
             --path="./releases" \
             --source="${{ github.repositoryUrl }}" \
             --revision="${{ github.ref_name }}@sha1:${{ github.sha }}" \
             --output json | jq -r '.digest')
-          echo "digest=${digest}" >> $GITHUB_OUTPUT
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Tag artifact as latest
         run: |
           flux tag artifact \
-            oci://ghcr.io/${{ github.repository }}/releases:${{ steps.version.outputs.semver }}@${{ steps.push.outputs.digest }} \
+            "oci://ghcr.io/${{ github.repository }}/releases:${{ steps.version.outputs.semver }}@${{ steps.push.outputs.digest }}" \
             --tag latest
+
+      # Git tag and GitHub Release are created last so that a failed OCI push
+      # does not leave an orphaned tag pointing at an absent artifact.
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create ${{ steps.version.outputs.tag }} \
+          gh release create "${{ steps.version.outputs.tag }}" \
             --generate-notes \
             --title "Release ${{ steps.version.outputs.tag }}"
+
+            
